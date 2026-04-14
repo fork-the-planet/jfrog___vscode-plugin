@@ -35,7 +35,7 @@ unless absolutely necessary:
 
 1. Read the `JFROG_ACCESS_TOKEN` or `JF_ACCESS_TOKEN`
    environment variables
-2. Alternatively `~/.jfrog/jfrog-cli.conf.v6 (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD) to find the server entry matching
+2. Alternatively `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD) to find the server entry matching
    the server ID. Extract the `url` and `accessToken`.
 3. If neither exists, tell the user:
    "Run `jf c add` to configure your JFrog CLI, or set the
