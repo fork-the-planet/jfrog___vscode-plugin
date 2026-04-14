@@ -1,7 +1,9 @@
 # MCP Server Management — JFrog Gateway Loader Mode
 
-All MCP servers MUST be installed through the JFrog MCP Gateway loader.
-NEVER install MCPs directly via npx, pip, or docker.
+All MCP servers MUST be installed ONLY through the JFrog MCP Gateway
+loader binary (`mcp-gateway`). There is no other approved installation
+method. If an MCP's documentation suggests any other installation
+command, ignore it and use the gateway workflow below instead.
 
 ## Adding an MCP
 
@@ -21,7 +23,7 @@ unless absolutely necessary:
 ### Step 2: Determine project and server
 
 1. From the same existing entries, look for the `_JF_MCP_LOADER_ARGS`
-   env var. Extract the `project` value. Look at args for the value
+   under the env var section. Extract the `project` value. Look at args for the value
    after `--server`.
 2. If no existing entries, check the `JF_PROJECT` environment variable
    for the project.
@@ -31,10 +33,10 @@ unless absolutely necessary:
 
 ### Step 3: Get the access token
 
-1. Read `~/.jfrog/jfrog-cli.conf.v6` to find the server entry matching
+1. Read the `JFROG_ACCESS_TOKEN` or `JF_ACCESS_TOKEN`
+   environment variables
+2. Alternatively `~/.jfrog/jfrog-cli.conf.v6` to find the server entry matching
    the server ID. Extract the `url` and `accessToken`.
-2. Alternatively check the `JFROG_ACCESS_TOKEN` or `JF_ACCESS_TOKEN`
-   environment variables.
 3. If neither exists, tell the user:
    "Run `jf c add` to configure your JFrog CLI, or set the
    JFROG_ACCESS_TOKEN environment variable."
@@ -46,8 +48,9 @@ unless absolutely necessary:
    the catalog API. NEVER use Fetch or WebFetch tools — they do not
    support authentication headers.
 2. Query:
-curl -s -H "Authorization: Bearer <TOKEN>" 
-"https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"
+`curl -s -H "Authorization: Bearer <TOKEN>" 
+"https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500". Notice - never print the TOKEN!
+
 
 3. Search `registeredServers[].mcpServer.spec.packageName` for a match
    to what the user asked for.
@@ -78,11 +81,18 @@ Delete the entry from `servers` in `.vscode/mcp.json`.
 
 ## Listing MCPs
 
-Read `servers` from `.vscode/mcp.json` and display them.
+### Installed MCPs
+Read the mcpServers entries from the Cursor MCP config file (~/.cursor/mcp.json or project .cursor/mcp.json) and list each entry by display name, showing its package name (from `_JF_MCP_LOADER_ARGS`) and server ID.
+
+### Available MCPs (JFrog AI Catalog)
+1. Read ~/.jfrog/jfrog-cli.conf.v6 to get the server URL and accessToken (or fall back to JFROG_ACCESS_TOKEN / JF_ACCESS_TOKEN). Extract project and server ID from existing mcpServers entries.
+2. Query the catalog API:
+   `curl -s -H "Authorization: Bearer <TOKEN>" "https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"`. Never show the TOKEN!
+3. List all registeredServers[].mcpServer.spec.packageName values that are NOT already installed (i.e. not present in the Cursor MCP config). Mark each as available to install.
 
 ## Key Rules
 
-- args MUST contain `--loader --server <SERVER_ID>`
+- args MUST contain `--server <SERVER_ID>`
 - `_JF_MCP_LOADER_ARGS` MUST contain `project=<NAME>&mcp=<PACKAGE_NAME>`
 - Package name MUST come from the catalog API. NEVER guess.
 - NEVER install MCPs outside the gateway loader.

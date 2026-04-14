@@ -6,12 +6,11 @@ if [ ! -f "$TARGET" ]; then
   mkdir -p .github
   cp "$TEMPLATE" "$TARGET"
 
-  jq -Rs '{
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext: ("JFrog MCP governance instructions added to .github/copilot-instructions.md. Commit this file to share with your team.\n\n" + .)
-    }
-  }' "$TEMPLATE"
+  # Read template content, escape for JSON
+  CONTENT=$(sed 's/\\/\\\\/g; s/"/\\"/g' "$TEMPLATE" | awk '{printf "%s\\n", $0}')
+  NOTICE="JFrog MCP governance instructions added to .github/copilot-instructions.md. Commit this file to share with your team.\\n\\n"
+
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s%s"}}' "$NOTICE" "$CONTENT"
 else
   echo '{}'
 fi
