@@ -48,10 +48,10 @@ unless absolutely necessary:
    the catalog API. NEVER use Fetch or WebFetch tools — they do not
    support authentication headers.
 2. Query:
-`curl -s -H "Authorization: Bearer <TOKEN>" 
-"https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500". Notice - never print the TOKEN!
-
-
+   ```
+   curl -s -H "Authorization: Bearer <TOKEN>" "https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"
+   ```
+   Notice - never print the TOKEN!
 3. Search `registeredServers[].mcpServer.spec.packageName` for a match
    to what the user asked for.
 4. If no match, show the available MCPs and ask which one they meant.
