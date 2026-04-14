@@ -82,7 +82,7 @@ Delete the entry from `servers` in `.vscode/mcp.json`.
 ## Listing MCPs
 
 ### Installed MCPs
-Read the mcpServers entries from the Cursor MCP config file (~/.cursor/mcp.json or project .cursor/mcp.json) and list each entry by display name, showing its package name (from `_JF_MCP_LOADER_ARGS`) and server ID.
+Read the mcpServers entries from the VSCode MCP config file (~/.vscode/mcp.json or project .vscode/mcp.json) and list each entry by display name, showing its package name (from `_JF_MCP_LOADER_ARGS`) and server ID.
 
 ### Available MCPs (JFrog AI Catalog)
 1. Read ~/.jfrog/jfrog-cli.conf.v6 to get the server URL and accessToken (or fall back to JFROG_ACCESS_TOKEN / JF_ACCESS_TOKEN). Extract project and server ID from existing mcpServers entries.
