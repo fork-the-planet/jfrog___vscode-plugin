@@ -88,7 +88,7 @@ Read the mcpServers entries from the VSCode MCP config file (~/.vscode/mcp.json 
 1. Read ~/.jfrog/jfrog-cli.conf.v6 to get the server URL and accessToken (or fall back to JFROG_ACCESS_TOKEN / JF_ACCESS_TOKEN). Extract project and server ID from existing mcpServers entries.
 2. Query the catalog API:
    `curl -s -H "Authorization: Bearer <TOKEN>" "https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"`. Never show the TOKEN!
-3. List all registeredServers[].mcpServer.spec.packageName values that are NOT already installed (i.e. not present in the Cursor MCP config). Mark each as available to install.
+3. List all registeredServers[].mcpServer.spec.packageName values that are NOT already installed (i.e. not present in the VSCode MCP config). Mark each as available to install.
 
 ## Key Rules
 
