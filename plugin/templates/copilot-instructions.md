@@ -98,5 +98,5 @@ Read the mcpServers entries from the VSCode MCP config file (~/.vscode/mcp.json 
 - NEVER install MCPs outside the gateway loader.
 - NEVER use Fetch/WebFetch for API calls that require authentication.
 - NEVER ask for info you can find in existing config or
-  `~/.jfrog/jfrog-cli.conf.v6`.
+  `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
 - To list installed MCPs: read `.vscode/mcp.json` and show the servers.
