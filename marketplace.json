@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "name": "JFrog Agent Plugins",
+  "publisher": {
+    "name": "JFrog",
+    "homepage": "https://jfrog.com",
+    "support": "https://support.jfrog.com"
+  },
+  "plugins": [
+    {
+      "name": "jfrog",
+      "description": "JFrog Platform integration with MCP, security skills, and supply-chain best practices",
+      "version": "0.1.0",
+      "source": "plugin",
+      "categories": ["security", "artifact-management", "supply-chain", "devops", "mcp", "ML-ops"],
+      "platforms": ["darwin", "linux", "windows"],
+      "requiredPermissions": [
+        "network",
+        "shell"
+      ]
+    }
+  ]
+}
