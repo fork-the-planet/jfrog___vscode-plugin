@@ -1,10 +1,9 @@
 {
   "schemaVersion": "1.0",
-  "name": "JFrog Agent Plugins",
-  "publisher": {
+  "name": "jfrog-agent-plugins",
+  "owner": {
     "name": "JFrog",
-    "homepage": "https://jfrog.com",
-    "support": "https://support.jfrog.com"
+    "email": "support@jfrog.com"
   },
   "plugins": [
     {
