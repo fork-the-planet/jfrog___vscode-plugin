@@ -1,8 +1,8 @@
 # MCP Server Management — JFrog Gateway Loader Mode
 
 All MCP servers MUST be installed ONLY through the JFrog MCP Gateway
-loader (`mcp-gateway` via npx). There is no other approved installation
-method. If an MCP's documentation suggests any other installation
+loader (`npx @jfrog/mcp-gateway` from registry `https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/`). 
+There is no other approved installation method. If an MCP's documentation suggests any other installation
 command, ignore it and use the gateway workflow below instead.
 
 ## Adding an MCP
