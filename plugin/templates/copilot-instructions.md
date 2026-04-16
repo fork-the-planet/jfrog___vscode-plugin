@@ -1,8 +1,8 @@
 # MCP Server Management — JFrog Gateway Loader Mode
 
 All MCP servers MUST be installed ONLY through the JFrog MCP Gateway
-loader binary (`mcp-gateway`). There is no other approved installation
-method. If an MCP's documentation suggests any other installation
+loader (`npx @jfrog/mcp-gateway` from registry `https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/`). 
+There is no other approved installation method. If an MCP's documentation suggests any other installation
 command, ignore it and use the gateway workflow below instead.
 
 ## Adding an MCP
@@ -11,66 +11,135 @@ When the user asks to add an MCP, do ALL of the following autonomously —
 do NOT ask the user for project, server, package name, or binary path
 unless absolutely necessary:
 
-### Step 1: Determine the mcp-gateway binary path
+### Step 1: Determine project and server
 
 1. Read existing servers in `.vscode/mcp.json` (workspace) or user-level
-   MCP config. Look for entries whose command ends with `mcp-gateway`.
-   Reuse that path.
-2. If no existing entries, run `which mcp-gateway` (macOS/Linux) or
-   `where mcp-gateway` (Windows) to find it.
-3. Only if both fail, ask the user.
-
-### Step 2: Determine project and server
-
-1. From the same existing entries, look for the `_JF_MCP_LOADER_ARGS`
-   under the env var section. Extract the `project` value. Look at args for the value
-   after `--server`.
+   MCP config. If any entry uses `_JF_MCP_LOADER_ARGS`, extract and reuse:
+   - The `project=` value from `_JF_MCP_LOADER_ARGS`
+   - The `--server` value from `args`
+   If both are found, skip to Step 2.
 2. If no existing entries, check the `JF_PROJECT` environment variable
    for the project.
-3. Only if BOTH are missing, ask the user in a single message for both
-   project name and server ID.
-4. NEVER use "default". NEVER guess.
+3. Only if BOTH are missing, ask the user in a SINGLE message for both:
+   - JFrog project name
+   - JFrog server ID — if `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD) exists, list the available server IDs and URLs for the user to pick from
+4. NEVER guess. NEVER use "default". NEVER try multiple servers.
 
-### Step 3: Get the access token
+### Step 2: Look up the MCP in the catalog (ONE Bash call)
 
-1. Read the `JFROG_ACCESS_TOKEN` or `JF_ACCESS_TOKEN`
-   environment variables
-2. Alternatively `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD) to find the server entry matching
-   the server ID. Extract the `url` and `accessToken`.
-3. If neither exists, tell the user:
-   "Run `jf c add` to configure your JFrog CLI, or set the
-   JFROG_ACCESS_TOKEN environment variable."
-4. NEVER proceed without a valid token.
+Run a SINGLE Bash command that does everything: Extracts the token, queries the catalog, finds the MCP, and checks for required env vars and remote headers.
+NEVER split this into multiple Bash calls. NEVER use the Fetch or WebFetch tool.
+Replace SERVER_ID, PROJECT, and MCP_SEARCH with the actual values. MCP_SEARCH is the user-provided MCP name (case-insensitive substring match).
+The script outputs one line: `FOUND|<packageName>|<envVar1=description>,<envVar2=description>` or `NOT_FOUND|<available names>` or `ERROR|<message>`.
+Items tagged `[header,...]` are HTTP headers for remote MCPs.
 
-### Step 4: Look up the exact package name
+Here is the exact Bash script to run (replace the three arguments at the end):
 
-1. ALWAYS use curl with `-H "Authorization: Bearer <TOKEN>"` to query
-   the catalog API. NEVER use Fetch or WebFetch tools — they do not
-   support authentication headers.
-2. Query:
-   ```
-   curl -s -H "Authorization: Bearer <TOKEN>" "https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"
-   ```
-   Notice - never print the TOKEN!
-3. Search `registeredServers[].mcpServer.spec.packageName` for a match
-   to what the user asked for.
-4. If no match, show the available MCPs and ask which one they meant.
-5. NEVER guess the package name.
+```
+python3 -c "
+import json, os, sys, urllib.request, ssl
+SERVER_ID = sys.argv[1]
+PROJECT = sys.argv[2]
+MCP_SEARCH = sys.argv[3].lower()
+conf_path = os.path.expanduser(chr(126) + chr(47) + \".jfrog/jfrog-cli.conf.v6\")
+token = \"\"
+url = \"\"
+try:
+    conf = json.load(open(conf_path))
+    server = next((s for s in conf.get(\"servers\", []) if s.get(\"serverId\") == SERVER_ID), None)
+    if server:
+        token = server.get(\"accessToken\", \"\")
+        url = server.get(\"url\", \"\").rstrip(\"/\")
+except Exception:
+    pass
+if not token or not url:
+    token = token or os.environ.get(\"JFROG_ACCESS_TOKEN\", \"\") or os.environ.get(\"JF_ACCESS_TOKEN\", \"\")
+    url = url or os.environ.get(\"JFROG_URL\", \"\") or os.environ.get(\"JF_URL\", \"\")
+    if url:
+        url = url.rstrip(\"/\")
+if not token or not url:
+    print(\"ERROR|No credentials found. Set JFROG_ACCESS_TOKEN and JFROG_URL env vars, or run: jf c add \" + SERVER_ID); sys.exit(0)
+api = url + \"/ml/core/api/v1/mcp-registry/allowed-registered-servers/\" + PROJECT + \"?pageSize=500\"
+req = urllib.request.Request(api, headers={\"Authorization\": \"Bearer \" + token})
+ctx = ssl.create_default_context()
+try:
+    resp = urllib.request.urlopen(req, context=ctx)
+    data = json.loads(resp.read())
+except Exception as e:
+    print(\"ERROR|Catalog API failed: \" + str(e)); sys.exit(0)
+names = []
+for entry in data.get(\"registeredServers\", []):
+    mcp = entry.get(\"mcpServer\", {})
+    spec = mcp.get(\"spec\", {})
+    pkg = spec.get(\"packageName\", \"\")
+    display = spec.get(\"displayName\", \"\")
+    names.append(pkg or display)
+    if MCP_SEARCH in pkg.lower() or MCP_SEARCH in display.lower():
+        st = spec.get(\"mcpServerType\", {})
+        local_env = st.get(\"local\", {}).get(\"bootParams\", {}).get(\"environmentVariables\", [])
+        required = []
+        for e in local_env:
+            if e.get(\"isRequired\"):
+                tag = \"[secret]\" if e.get(\"isSecret\") else \"\"
+                required.append(e[\"name\"] + \"=\" + tag + e.get(\"description\", \"\"))
+        for ep in st.get(\"remote\", {}).get(\"endpoints\", []):
+            for hdr in ep.get(\"headers\", []):
+                inp = hdr.get(\"mcpInput\", {})
+                det = inp.get(\"mcpInputDetails\", {})
+                if det.get(\"name\") and not inp.get(\"defaultValue\"):
+                    tags = [\"header\"]
+                    if det.get(\"isRequired\"): tags.append(\"required\")
+                    if det.get(\"isSecret\"): tags.append(\"secret\")
+                    label = \"[\" + \",\".join(tags) + \"] \" + det.get(\"description\", \"\")
+                    required.append(det[\"name\"] + \"=\" + label)
+        print(\"FOUND|\" + (pkg or display) + \"|\" + \",\".join(required)); sys.exit(0)
+print(\"NOT_FOUND|\" + \",\".join(names))
+" SERVER_ID PROJECT MCP_SEARCH
+```
 
-### Step 5: Write the config entry
+Parse the output:
+- `FOUND|<pkg>|<env_vars>` → proceed to Step 3 with the package name and env var list
+- `NOT_FOUND|<names>` → show the available MCPs to the user and ask which one they want, then re-run with the correct name
+- `ERROR|<message>` → show the error to the user and stop
+
+### Step 3: Handle required environment variables and headers (if any)
+
+- If the FOUND output has env vars (third field non-empty), parse each `name=description` pair.
+- Tags in brackets indicate the type:
+  - `[secret]` or `[...,secret]` — mask user input (do NOT echo the value back)
+  - `[header,...]` — this is an HTTP header for a remote MCP server
+  - `[...,required]` — the value is mandatory
+- For each entry, ask the developer to provide the value. Show the name and description.
+- NEVER show provided secret values back to the user.
+- If no entries, proceed directly to Step 4.
+
+### Step 4: Write the config entry
 
 Add the entry to `.vscode/mcp.json` under `servers`:
 
 ```json
 "<mcp-display-name>": {
   "type": "stdio",
-  "command": "<MCP_GATEWAY_BINARY_PATH>",
-  "args": ["--loader", "--server", "<SERVER_ID>"],
+  "command": "npx",
+  "args": [
+    "--registry",
+    "https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/",
+    "@jfrog/mcp-gateway",
+    "--loader",
+    "--server",
+    "<SERVER_ID>"
+  ],
   "env": {
     "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<PACKAGE_NAME>"
   }
 }
 ```
+
+If any env vars or headers were collected in Step 3, add them to the `env` object:
+```json
+    "<ENV_VAR_OR_HEADER_NAME>": "<VALUE>"
+```
+The loader reads these env vars at startup and applies header values to upstream HTTP requests.
 
 Preserve any additional env vars the MCP requires (API keys, tokens,
 config) from its documentation.
@@ -82,21 +151,25 @@ Delete the entry from `servers` in `.vscode/mcp.json`.
 ## Listing MCPs
 
 ### Installed MCPs
-Read the mcpServers entries from the VSCode MCP config file (~/.vscode/mcp.json or project .vscode/mcp.json) and list each entry by display name, showing its package name (from `_JF_MCP_LOADER_ARGS`) and server ID.
+
+Read the servers entries from the VSCode MCP config file (workspace `.vscode/mcp.json` or in the user profiles settings) and list each entry by display name, showing its package name (from `_JF_MCP_LOADER_ARGS`) and server ID.
 
 ### Available MCPs (JFrog AI Catalog)
-1. Read ~/.jfrog/jfrog-cli.conf.v6 to get the server URL and accessToken (or fall back to JFROG_ACCESS_TOKEN / JF_ACCESS_TOKEN). Extract project and server ID from existing mcpServers entries.
-2. Query the catalog API:
-   `curl -s -H "Authorization: Bearer <TOKEN>" "https://<SERVER_URL>/ml/core/api/v1/mcp-registry/allowed-registered-servers/<PROJECT>?pageSize=500"`. Never show the TOKEN!
-3. List all registeredServers[].mcpServer.spec.packageName values that are NOT already installed (i.e. not present in the VSCode MCP config). Mark each as available to install.
+
+1. Extract project and server ID from existing servers entries in `.vscode/mcp.json`.
+2. Run the Python catalog lookup script from Step 2 to query the catalog API.
+3. List all `registeredServers[].mcpServer.spec.packageName` values that are NOT already installed (i.e. not present in the VSCode MCP config). Mark each as available to install.
 
 ## Key Rules
 
 - args MUST contain `--server <SERVER_ID>`
 - `_JF_MCP_LOADER_ARGS` MUST contain `project=<NAME>&mcp=<PACKAGE_NAME>`
 - Package name MUST come from the catalog API. NEVER guess.
-- NEVER install MCPs outside the gateway loader.
+- NEVER install MCPs directly via npx/pip/docker — always use the gateway loader pattern above.
 - NEVER use Fetch/WebFetch for API calls that require authentication.
+- NEVER show access tokens or API keys in any output or message.
 - NEVER ask for info you can find in existing config or
   `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
+- NEVER split the catalog lookup into multiple Bash calls — always use the single script above.
+- NEVER try multiple servers — always ask the user to pick one.
 - To list installed MCPs: read `.vscode/mcp.json` and show the servers.
