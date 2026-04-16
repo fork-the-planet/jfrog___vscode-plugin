@@ -118,19 +118,23 @@ Parse the output:
 Add the entry to `.vscode/mcp.json` under `servers`:
 
 ```json
-"<mcp-display-name>": {
-  "type": "stdio",
-  "command": "npx",
-  "args": [
-    "--registry",
-    "https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/",
-    "@jfrog/mcp-gateway",
-    "--loader",
-    "--server",
-    "<SERVER_ID>"
-  ],
-  "env": {
-    "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<PACKAGE_NAME>"
+{
+  "servers": {
+    "<mcp-display-name>": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "--registry",
+        "https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/",
+        "@jfrog/mcp-gateway",
+        "--loader",
+        "--server",
+        "<SERVER_ID>"
+      ],
+      "env": {
+        "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<PACKAGE_NAME>"
+      }
+    }
   }
 }
 ```
