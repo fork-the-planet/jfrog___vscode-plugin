@@ -127,7 +127,6 @@ Add the entry to `.vscode/mcp.json` under `servers`:
         "--registry",
         "https://releases.jfrog.io/artifactory/api/npm/jfml-coding-agents-npm/",
         "@jfrog/mcp-gateway",
-        "--loader",
         "--server",
         "<SERVER_ID>"
       ],
