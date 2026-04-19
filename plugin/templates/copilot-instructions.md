@@ -24,10 +24,13 @@ unless absolutely necessary:
    for the project.
 3. Only if BOTH are missing, ask the user in a SINGLE message for both:
    - JFrog project name
-   - JFrog server ID - if `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and
-     Windows PowerShell) or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6`
-     (Windows CMD) exists, list the available server IDs and URLs for
-     the user to pick from
+   - JFrog server ID - run a terminal command to read
+     `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell)
+     or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
+     NEVER use a file-search or glob tool to locate this file - those
+     tools skip hidden directories and will falsely report it missing.
+     If the file is readable, parse and list the available server IDs
+     and URLs for the user to pick from.
 4. NEVER guess. NEVER use "default". NEVER try multiple servers.
 
 ### Step 2: Look up the MCP in the catalog (ONE Bash call)
@@ -123,11 +126,21 @@ and server ID.
 
 ### Available MCPs (JFrog AI Catalog)
 
-1. Extract project and server ID from existing `servers` entries in
-   `.vscode/mcp.json`.
-2. Run the lookup script from Step 2 with an empty or broad
-   `MCP_SEARCH` value to retrieve all entries, then filter out
-   already-installed package names.
+1. Determine project and server ID using the same fallback chain as
+   "Adding an MCP -> Step 1":
+   - Try to extract from existing `_JF_MCP_LOADER_ARGS` entries in
+     `.vscode/mcp.json`.
+   - If not found, check the `JF_PROJECT` environment variable for the
+     project.
+   - If still missing, read `~/.jfrog/jfrog-cli.conf.v6` via a terminal
+     command (NEVER via file-search/glob - hidden directories are
+     skipped) for available server IDs and ask the user to pick project
+     and server in a SINGLE message.
+   - NEVER skip this step - always query the catalog even when
+     `servers` is empty.
+2. Run the lookup script from Step 2 using `__list_all__` as
+   `MCP_SEARCH` (it won't match any package, so the script returns
+   `NOT_FOUND|<all names>` - parse that list as the full catalog).
 3. List all `registeredServers[].mcpServer.spec.packageName` values that
    are NOT already installed. Mark each as available to install.
 
@@ -141,9 +154,11 @@ and server ID.
   gateway pattern above.
 - NEVER use Fetch/WebFetch for API calls that require authentication.
 - NEVER show access tokens or API keys in any output or message.
-- NEVER ask for info you can find in existing config or
+- NEVER ask for info you can find in existing config or in
   `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell) or
-  `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
+  `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD). Always read
+  this file via a terminal command - never via file-search or glob
+  tools, which skip hidden directories.
 - NEVER split the catalog lookup into multiple Bash calls - always run
   the bundled script (`.github/scripts/lookup-mcp-catalog.py`).
 - NEVER try multiple servers - always ask the user to pick one.
