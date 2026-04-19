@@ -18,9 +18,9 @@ fi
 
 if [ ! -f "$TARGET" ]; then
   cp "$TEMPLATE" "$TARGET"
+
+  CONTENT=$(sed 's/\\/\\\\/g; s/"/\\"/g' "$TEMPLATE" | awk '{printf "%s\\n", $0}')
+  NOTICE="JFrog MCP governance: .github/copilot-instructions.md and .github/scripts/lookup-mcp-catalog.py installed by the JFrog plugin.\\n\\n"
+
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s%s"}}' "$NOTICE" "$CONTENT"
 fi
-
-CONTENT=$(sed 's/\\/\\\\/g; s/"/\\"/g' "$TEMPLATE" | awk '{printf "%s\\n", $0}')
-NOTICE="JFrog MCP governance: .github/copilot-instructions.md and .github/scripts/lookup-mcp-catalog.py installed by the JFrog plugin.\\n\\n"
-
-printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s%s"}}' "$NOTICE" "$CONTENT"
