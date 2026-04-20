@@ -16,9 +16,10 @@ import ssl
 import sys
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Optional
 
-JFROG_CLI_CONFIG_PATH = os.path.expanduser("~/.jfrog/jfrog-cli.conf.v6")
+JFROG_CLI_CONFIG_PATH = Path.home() / ".jfrog" / "jfrog-cli.conf.v6"
 
 MCP_REGISTRY_API_PATH = "/ml/core/api/v1/mcp-registry/allowed-registered-servers"
 MCP_REGISTRY_PAGE_SIZE = 500
@@ -38,11 +39,8 @@ class LookupError(Exception):
 
 def parse_args(argv: list[str]) -> tuple[str, str, str]:
     if len(argv) != 4:
-        raise LookupError(
-            "Usage: lookup-mcp-catalog.py <SERVER_ID> <PROJECT> <MCP>"
-        )
-    server_id, project, mcp = argv[1], argv[2], argv[3].lower()
-    return server_id, project, mcp
+        raise LookupError("Usage: lookup-mcp-catalog.py <SERVER_ID> <PROJECT> <MCP>")
+    return argv[1], argv[2], argv[3]
 
 
 def load_credentials_from_cli_config(server_id: str) -> tuple[str, str]:
@@ -59,14 +57,20 @@ def load_credentials_from_cli_config(server_id: str) -> tuple[str, str]:
     )
     if not server:
         return "", ""
-    return server.get("accessToken", ""), server.get("url", "").rstrip("/")
+    return server.get("accessToken", ""), server.get("url", "")
 
 
 def load_credentials_from_env() -> tuple[str, str]:
     """Try to load (token, url) from environment variables."""
-    token = next((os.environ.get(name, "") for name in TOKEN_ENV_VARS if os.environ.get(name)), "")
-    url = next((os.environ.get(name, "") for name in URL_ENV_VARS if os.environ.get(name)), "")
-    return token, url.rstrip("/")
+    token = next(
+        (os.environ.get(name, "") for name in TOKEN_ENV_VARS if os.environ.get(name)),
+        "",
+    )
+    url = next(
+        (os.environ.get(name, "") for name in URL_ENV_VARS if os.environ.get(name)),
+        "",
+    )
+    return token, url
 
 
 def resolve_credentials(server_id: str) -> tuple[str, str]:
@@ -84,11 +88,24 @@ def resolve_credentials(server_id: str) -> tuple[str, str]:
     return token, url
 
 
+def _base_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        raise LookupError(f"Invalid JFrog URL: {url!r}")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def fetch_catalog(url: str, token: str, project: str) -> dict[str, Any]:
     """Call the MCP registry API and return the parsed JSON response."""
+    base_url = _base_url(url)
     safe_project = urllib.parse.quote(project, safe="")
-    api_url = f"{url}{MCP_REGISTRY_API_PATH}/{safe_project}?pageSize={MCP_REGISTRY_PAGE_SIZE}"
-    request = urllib.request.Request(api_url, headers={"Authorization": f"Bearer {token}"})
+    api_url = (
+        f"{base_url}{MCP_REGISTRY_API_PATH}/{safe_project}"
+        f"?pageSize={MCP_REGISTRY_PAGE_SIZE}"
+    )
+    request = urllib.request.Request(
+        api_url, headers={"Authorization": f"Bearer {token}"}
+    )
     try:
         with urllib.request.urlopen(
             request,
@@ -103,10 +120,8 @@ def fetch_catalog(url: str, token: str, project: str) -> dict[str, Any]:
 def find_matching_mcp(
     catalog: dict[str, Any], mcp: str
 ) -> tuple[Optional[dict[str, Any]], list[str]]:
-    """Return (matching MCP spec, list of all names) for the given mcp query.
-
-    An empty `mcp` always returns (None, all_names).
-    """
+    """Return (matching MCP spec, list of all names) for the given mcp query."""
+    mcp_query = mcp.lower()
     all_names: list[str] = []
     matching_mcp: Optional[dict[str, Any]] = None
 
@@ -116,10 +131,15 @@ def find_matching_mcp(
         display_name = spec.get("displayName", "")
         all_names.append(package_name or display_name)
 
-        if matching_mcp is None and mcp and (
-            mcp in package_name.lower() or mcp in display_name.lower()
-        ):
+        if not mcp_query:
+            continue
+
+        mcp_matches_entry = (
+            mcp_query in package_name.lower() or mcp_query in display_name.lower()
+        )
+        if mcp_matches_entry:
             matching_mcp = spec
+            break
 
     return matching_mcp, all_names
 
@@ -134,7 +154,11 @@ def collect_required_inputs(spec: dict[str, Any]) -> list[str]:
 
 
 def _collect_local_env_vars(server_type: dict[str, Any]) -> list[str]:
-    env_vars = server_type.get("local", {}).get("bootParams", {}).get("environmentVariables", [])
+    env_vars = (
+        server_type.get("local", {})
+        .get("bootParams", {})
+        .get("environmentVariables", [])
+    )
     collected: list[str] = []
     for env_var in env_vars:
         if not env_var.get("isRequired"):
@@ -169,9 +193,14 @@ def _strip_separator(value: str) -> str:
 
 
 def format_found(spec: dict[str, Any]) -> str:
-    package_name = _strip_separator(spec.get("packageName", "") or spec.get("displayName", ""))
+    package_name = _strip_separator(
+        spec.get("packageName", "") or spec.get("displayName", "")
+    )
     inputs = [_strip_separator(i) for i in collect_required_inputs(spec)]
-    return f"FOUND{OUTPUT_FIELD_SEPARATOR}{package_name}{OUTPUT_FIELD_SEPARATOR}{','.join(inputs)}"
+    return (
+        f"FOUND{OUTPUT_FIELD_SEPARATOR}{package_name}"
+        f"{OUTPUT_FIELD_SEPARATOR}{','.join(inputs)}"
+    )
 
 
 def format_not_found(all_names: list[str]) -> str:
@@ -183,7 +212,7 @@ def format_error(message: str) -> str:
     return f"ERROR{OUTPUT_FIELD_SEPARATOR}{_strip_separator(message)}"
 
 
-def run(argv: list[str]) -> str:
+def main(argv: list[str]) -> str:
     try:
         server_id, project, mcp = parse_args(argv)
         token, url = resolve_credentials(server_id)
@@ -198,4 +227,4 @@ def run(argv: list[str]) -> str:
 
 
 if __name__ == "__main__":
-    print(run(sys.argv))
+    print(main(sys.argv))
