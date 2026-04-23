@@ -33,54 +33,77 @@ unless absolutely necessary:
      and URLs for the user to pick from.
 4. NEVER guess. NEVER use "default". NEVER try multiple servers.
 
-### Step 2: Look up the MCP in the catalog (ONE Bash call)
+### Step 2: Look up the MCP in the catalog
 
-Run a SINGLE Bash command that calls the bundled catalog lookup script.
-NEVER split this into multiple Bash calls. NEVER use the Fetch or
-WebFetch tool.
+Run ONE of the following commands. Do NOT use the Fetch or WebFetch
+tool. Do NOT write a custom script. Do NOT hit the JFrog API directly.
 
-The script is shipped alongside these instructions at
-`.github/scripts/lookup-mcp-catalog.py`. Replace `SERVER_ID`, `PROJECT`,
-and `MCP_SEARCH` with the actual values. `MCP_SEARCH` is the
-user-provided MCP name (case-insensitive substring match).
+**If the user gave a specific MCP name** (normal "add X" case):
 
 ```
-python3 .github/scripts/lookup-mcp-catalog.py "<SERVER_ID>" "<PROJECT>" "<MCP_SEARCH>"
+npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --inspect \
+  --server <SERVER_ID> \
+  --project <PROJECT> \
+  --mcp <MCP_NAME>
 ```
 
-The script outputs ONE line:
+Output is a JSON object: `{ "spec": { "packageName": "...",
+"mcpServerType": { "local": { "bootParams": {...} }, "remote": {...} }
+... } }`. Parse it and extract:
 
-- `FOUND|<packageName>|<envVar1=description>,<envVar2=description>` -
-  proceed to Step 3 with the package name and env var list
-- `NOT_FOUND|<comma-separated available names>` - show the available
-  MCPs to the user and ask which one they want, then re-run with the
-  correct name
-- `ERROR|<message>` - show the error to the user and stop
+- `spec.packageName` - the exact package name to use in the config
+- `spec.mcpServerType.local.bootParams.environmentVariables[]` -
+  required env vars (entries where `isRequired=true`)
+- `spec.mcpServerType.remote.endpoints[].headers[]` where
+  `mcpInput.mcpInputDetails.isRequired=true` - required HTTP headers
+  for remote MCPs
 
-Items tagged `[header,...]` are HTTP headers for remote MCPs.
+If the command exits non-zero (MCP not found, network error, bad
+credentials), show the error message to the user and then run
+`--list-available` (see below) to offer the valid alternatives.
 
-### Step 3: Handle required environment variables and headers (if any)
+**If the user did NOT specify a name** (e.g. "what can I install?"),
+run `--list-available` instead (see "Listing MCPs" below).
 
-- If the `FOUND` output has env vars (third field non-empty), parse each
-  `name=description` pair.
-- Tags in brackets indicate the type:
-  - `[secret]` or `[...,secret]` - mask user input (do NOT echo the
-    value back)
-  - `[header,...]` - this is an HTTP header for a remote MCP server
-  - `[...,required]` - the value is mandatory
-- For each entry, ask the developer to provide the value. Show the name
-  and description.
-- NEVER show provided secret values back to the user.
-- If no entries, proceed directly to Step 4.
+### Step 3: Plan inputs
+
+From the `--inspect` output, collect the list of configurable inputs
+(env vars for local MCPs, HTTP headers for remote MCPs). You will NOT
+ask the user for their values here - VS Code will prompt for them the
+first time the server starts, using its native secure-input mechanism
+(values are stored in the OS keychain, never in the file).
+
+- **Required inputs** (`isRequired=true`) - always include them in
+  Step 4. Record `name`, `description`, and `isSecret`.
+- **Optional inputs** (`isRequired=false`) - show the user the list of
+  optional env vars / headers along with their descriptions, and ask
+  which ones they want to configure. Include only the opted-in ones
+  in Step 4, with the same `name` / `description` / `isSecret`
+  metadata.
+- If the inspect output has no inputs at all, skip the `inputs` block
+  in Step 4.
 
 ### Step 4: Write the config entry
 
-Add the entry to `.vscode/mcp.json` under `servers`:
+Add the entry to `.vscode/mcp.json` under `servers`, and declare every
+required input under a top-level `inputs` array. **Secrets MUST use
+`${input:...}` substitution - never write a raw secret value into the
+JSON file.**
 
 ```json
 {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "<mcp-slug>-<input-name-lowercased>",
+      "description": "<description from the catalog>",
+      "password": true
+    }
+  ],
   "servers": {
-    "<mcp-display-name>": {
+    "<spec.packageName>": {
       "type": "stdio",
       "command": "npx",
       "args": [
@@ -91,29 +114,45 @@ Add the entry to `.vscode/mcp.json` under `servers`:
         "<SERVER_ID>"
       ],
       "env": {
-        "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<PACKAGE_NAME>"
+        "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<spec.packageName>",
+        "<ENV_VAR_OR_HEADER_NAME>": "${input:<mcp-slug>-<input-name-lowercased>}"
       }
     }
   }
 }
 ```
 
-If any env vars or headers were collected in Step 3, add them to the
-`env` object:
+Rules for the `inputs` block:
 
-```json
-    "<ENV_VAR_OR_HEADER_NAME>": "<VALUE>"
-```
+- One entry per required env var / header from Step 3.
+- `id` is a workspace-unique slug - use
+  `<mcp-slug>-<input-name-lowercased>` (e.g. `postman-authorization`,
+  `kibana-api-key`). Re-use the same `id` across servers only when the
+  value truly is shared.
+- `type` is always `"promptString"`.
+- `password: true` for secret inputs (catalog `isSecret=true`) - hides
+  the characters VS Code shows while typing and stores the value
+  encrypted. Omit `password` for non-secret values like URLs.
+- `description` shows in the VS Code prompt - use the catalog's
+  `description` field.
+- Reference the input from `env` with `"${input:<id>}"`. For HTTP
+  headers with a `Bearer` prefix, either put the prefix in the
+  description and ask the user to include it, or use
+  `"Bearer ${input:<id>}"` and ask only for the token.
 
-The loader reads these env vars at startup and applies header values to
-upstream HTTP requests.
+If the server has a NON-secret env var (e.g. `KIBANA_URL`), use an
+input entry WITHOUT `password: true` so VS Code still prompts but
+doesn't mask the typing.
 
-Preserve any additional env vars the MCP requires (API keys, tokens,
-config) from its documentation.
+The loader reads these env vars at startup. VS Code substitutes every
+`${input:<id>}` with the stored value before handing the env to the
+process - so the gateway sees the real value, the file on disk shows
+only the placeholder.
 
 ## Removing an MCP
 
-Delete the entry from `servers` in `.vscode/mcp.json`.
+Delete the entry from `servers` in `.vscode/mcp.json` and any now-unused
+entries from the top-level `inputs` array.
 
 ## Listing MCPs
 
@@ -136,18 +175,32 @@ and server ID.
      command (NEVER via file-search/glob - hidden directories are
      skipped) for available server IDs and ask the user to pick project
      and server in a SINGLE message.
-   - NEVER skip this step - always query the catalog even when
-     `servers` is empty.
-2. Run the lookup script from Step 2 using `__list_all__` as
-   `MCP_SEARCH` (it won't match any package, so the script returns
-   `NOT_FOUND|<all names>` - parse that list as the full catalog).
-3. List all `registeredServers[].mcpServer.spec.packageName` values that
-   are NOT already installed. Mark each as available to install.
+2. Run the gateway with `--list-available`:
+
+```
+npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --list-available \
+  --server <SERVER_ID> \
+  --project <PROJECT>
+```
+
+The output is a JSON array where each element has `name`,
+`packageName`, `description`, `type`, `packageVersion`, and optionally
+an inline `env[]` array of required environment variables (same shape
+as the full `--inspect` output).
+
+3. Compare each `packageName` against the `_JF_MCP_LOADER_ARGS` values
+   already present in `.vscode/mcp.json` to mark each one as
+   "available to install" or "already installed".
 
 ## Key Rules
 
-- **`npx` form `args` order (required):** `@jfrog/mcp-gateway`,
-  `--registry`, registry URL, `--server <SERVER_ID>`.
+- **`npx` form `args` order (required):** `--registry`, registry URL,
+  `@jfrog/mcp-gateway`, `--server <SERVER_ID>`. `--registry` MUST come
+  BEFORE `@jfrog/mcp-gateway` so `npx` picks it up; otherwise `npx`
+  falls back to the user's default registry and the gateway package
+  resolves to 404.
 - `_JF_MCP_LOADER_ARGS` MUST contain `project=<NAME>&mcp=<PACKAGE_NAME>`.
 - Package name MUST come from the catalog API. NEVER guess.
 - NEVER install MCPs directly via `npx`/`pip`/`docker` - always use the
@@ -159,7 +212,5 @@ and server ID.
   `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD). Always read
   this file via a terminal command - never via file-search or glob
   tools, which skip hidden directories.
-- NEVER split the catalog lookup into multiple Bash calls - always run
-  the bundled script (`.github/scripts/lookup-mcp-catalog.py`).
 - NEVER try multiple servers - always ask the user to pick one.
 - To list installed MCPs: read `.vscode/mcp.json` and show the servers.
