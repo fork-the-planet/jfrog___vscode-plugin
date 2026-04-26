@@ -41,7 +41,8 @@ tool. Do NOT write a custom script. Do NOT hit the JFrog API directly.
 **If the user gave a specific MCP name** (normal "add X" case):
 
 ```
-npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
   @jfrog/mcp-gateway \
   --inspect \
   --server <SERVER_ID> \
@@ -119,6 +120,7 @@ JSON file.**
       "type": "stdio",
       "command": "npx",
       "args": [
+        "--yes",
         "--registry",
         "https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/",
         "@jfrog/mcp-gateway",
@@ -178,7 +180,8 @@ Tell the user "I'm going to open your browser to sign you in to
 `<MCP_NAME>`" before running it:
 
 ```
-npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
   @jfrog/mcp-gateway \
   --login \
   --server <SERVER_ID> \
@@ -194,21 +197,43 @@ Outcomes:
   auth needed. Ignore the error; the server is ready to start.
 - Any other error - paste it to the user verbatim and stop.
 
-## Troubleshooting a server that fails to start
+## Troubleshooting
 
-If a previously-working OAuth MCP starts failing later, the cached
-refresh token is likely dead. Re-run Step 5; the new tokens
-overwrite the old ones.
+### How to know a server actually failed
 
-For any other failure, ask the user to open `MCP: List Servers`,
-right-click the failed server, choose **Show Output**, and share
-the output before diagnosing. Common recoveries:
+VS Code labels MCP servers as Running, Stopped, or Failed in
+`MCP: List Servers`. There is also a silent failure mode:
 
-- If the user thinks the stored secret is wrong, the **Clear**
-  CodeLens above the matching `inputs` entry in `.vscode/mcp.json`
-  lets VS Code re-prompt on the next start.
-- If the failure is a network/proxy issue, that's outside the
-  gateway's scope - tell the user and stop.
+- A server reporting **0 tools** (or **"Discovered 0 tools"**) while
+  shown as Running is NOT a healthy server with no tools - it means
+  the gateway connected but the underlying MCP did not come up, so
+  no tools were exposed. Treat 0 tools the same as a Failed status.
+
+If the user says "the MCP isn't doing anything" or "tools aren't
+showing up", check for both states before assuming the server is
+working.
+
+### What to do
+
+1. **Previously-working OAuth MCP suddenly failing** - the cached
+   refresh token is likely dead. Re-run Step 5; the new tokens
+   overwrite the old ones.
+
+2. **Anything else** - ask the user to open `MCP: List Servers`,
+   right-click the failed (or 0-tools) server, choose **Show
+   Output**, and paste the last 50 lines. Read the output before
+   guessing at a cause. Common recoveries based on what the output
+   shows:
+
+   - HTTP 401 / 403 / authentication error on a server with
+     `${input:...}` in its entry - the stored secret is wrong. Tell
+     the user to click the **Clear** CodeLens above the matching
+     `inputs` entry in `.vscode/mcp.json`, then restart the server;
+     VS Code will re-prompt for the secret.
+   - `Failed to refresh OAuth token` / `invalid_grant` /
+     `No such refresh token found` - re-run Step 5.
+   - Network / proxy / DNS error - outside the gateway's scope;
+     tell the user and stop.
 
 ## Removing an MCP
 
@@ -239,7 +264,8 @@ and server ID.
 2. Run the gateway with `--list-available`:
 
 ```
-npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
   @jfrog/mcp-gateway \
   --list-available \
   --server <SERVER_ID> \
@@ -257,11 +283,13 @@ as the full `--inspect` output).
 
 ## Key Rules
 
-- **`npx` form `args` order (required):** `--registry`, registry URL,
-  `@jfrog/mcp-gateway`, `--server <SERVER_ID>`. `--registry` MUST come
-  BEFORE `@jfrog/mcp-gateway` so `npx` picks it up; otherwise `npx`
-  falls back to the user's default registry and the gateway package
-  resolves to 404.
+- **`npx` argument order (required):** `--yes`, `--registry <URL>`,
+  `@jfrog/mcp-gateway`, then the gateway flags (`--inspect`,
+  `--login`, `--list-available`, or `--server <SERVER_ID>` for loader
+  mode). Both `--yes` and `--registry` MUST come BEFORE
+  `@jfrog/mcp-gateway` so `npx` picks them up; otherwise `npx` falls
+  back to the user's default registry (resolves to 404) and may
+  block on a confirmation prompt with no TTY.
 - **OAuth login** uses `npx @jfrog/mcp-gateway --login` (Step 5).
   Run it automatically after Step 4 for remote MCPs that have no
   required headers, and again later if a previously-working OAuth
