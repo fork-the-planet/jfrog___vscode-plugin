@@ -24,7 +24,7 @@ unless absolutely necessary:
    for the project.
 3. Only if BOTH are missing, ask the user in a SINGLE message for both:
    - JFrog project name
-   - JFrog server ID - run a terminal command to read
+   - JFrog server ID - read the JSON config file
      `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell)
      or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
      NEVER use a file-search or glob tool to locate this file - those
@@ -33,57 +33,94 @@ unless absolutely necessary:
      and URLs for the user to pick from.
 4. NEVER guess. NEVER use "default". NEVER try multiple servers.
 
-### Step 2: Look up the MCP in the catalog (ONE Bash call)
+### Step 2: Look up the MCP in the catalog
 
-Run a SINGLE Bash command that calls the bundled catalog lookup script.
-NEVER split this into multiple Bash calls. NEVER use the Fetch or
-WebFetch tool.
+Run ONE of the following commands. Do NOT use the Fetch or WebFetch
+tool. Do NOT write a custom script. Do NOT hit the JFrog API directly.
 
-The script is shipped alongside these instructions at
-`.github/scripts/lookup-mcp-catalog.py`. Replace `SERVER_ID`, `PROJECT`,
-and `MCP_SEARCH` with the actual values. `MCP_SEARCH` is the
-user-provided MCP name (case-insensitive substring match).
+**If the user gave a specific MCP name** (normal "add X" case):
 
 ```
-python3 .github/scripts/lookup-mcp-catalog.py "<SERVER_ID>" "<PROJECT>" "<MCP_SEARCH>"
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --inspect \
+  --server <SERVER_ID> \
+  --project <PROJECT> \
+  --mcp <MCP_NAME>
 ```
 
-The script outputs ONE line:
+Output is a JSON object: `{ "spec": { "packageName": "...",
+"mcpServerType": { "local": { "bootParams": {...} }, "remote": {...} }
+... } }`. Parse it and extract ALL of the following (do NOT pre-filter
+to required-only - Step 3 needs both required and optional entries):
 
-- `FOUND|<packageName>|<envVar1=description>,<envVar2=description>` -
-  proceed to Step 3 with the package name and env var list
-- `NOT_FOUND|<comma-separated available names>` - show the available
-  MCPs to the user and ask which one they want, then re-run with the
-  correct name
-- `ERROR|<message>` - show the error to the user and stop
+- `spec.packageName` - the exact package name to use in the config.
+- `spec.mcpServerType.local.bootParams.environmentVariables[]` - every
+  env var entry for local MCPs. Each has `name`, `description`,
+  `isRequired`, `isSecret`. Keep all of them, including
+  `isRequired=false`.
+- `spec.mcpServerType.remote.endpoints[].headers[]` - every HTTP
+  header entry for remote MCPs. Each has a `name` and an
+  `mcpInput.mcpInputDetails` object with `description`, `isRequired`,
+  `isSecret`. Keep all of them, including `isRequired=false`.
 
-Items tagged `[header,...]` are HTTP headers for remote MCPs.
+If the command exits non-zero (MCP not found, network error, bad
+credentials), show the error message to the user and then run
+`--list-available` (see below) to offer the valid alternatives.
 
-### Step 3: Handle required environment variables and headers (if any)
+**If the user did NOT specify a name** (e.g. "what can I install?"),
+run `--list-available` instead (see "Listing MCPs" below).
 
-- If the `FOUND` output has env vars (third field non-empty), parse each
-  `name=description` pair.
-- Tags in brackets indicate the type:
-  - `[secret]` or `[...,secret]` - mask user input (do NOT echo the
-    value back)
-  - `[header,...]` - this is an HTTP header for a remote MCP server
-  - `[...,required]` - the value is mandatory
-- For each entry, ask the developer to provide the value. Show the name
-  and description.
-- NEVER show provided secret values back to the user.
-- If no entries, proceed directly to Step 4.
+### Step 3: Plan inputs
+
+Take the inputs you collected in Step 2 and split them into two
+groups by `isRequired`. You will NOT ask the user for the *values*
+here - VS Code will prompt for those the first time the server
+starts, using its native secure-input mechanism (values are stored
+in the OS keychain, never in the file).
+
+1. **Required inputs** (`isRequired=true`) - always include them in
+   Step 4. Record `name`, `description`, and `isSecret`.
+2. **Optional inputs** (`isRequired=false`) - if Step 2 returned
+   even ONE optional input, you MUST stop and ask the user before
+   continuing to Step 4. The message you send the user should:
+   - First list each REQUIRED input (so the user knows what will
+     be added without asking).
+   - Then list each OPTIONAL input by name, with its description,
+     and ask which (if any) they want to configure.
+   - Wait for the user's answer.
+
+   Do NOT skip this question. Do NOT include optional inputs by
+   default. Do NOT decide on the user's behalf. Continue to Step 4
+   only after the user answers, and include exactly the inputs they
+   opted into.
+3. If Step 2 returned no inputs at all (neither required nor
+   optional), skip the `inputs` block within Step 4.
 
 ### Step 4: Write the config entry
 
-Add the entry to `.vscode/mcp.json` under `servers`:
+Add the entry to `.vscode/mcp.json` under `servers`, and declare every
+required input under a top-level `inputs` array. **Secrets MUST use
+`${input:...}` substitution - never write a raw secret value into the
+JSON file.**
 
 ```json
 {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "<mcp-slug>-<input-name-lowercased>",
+      "description": "<description from the catalog>",
+      "password": true
+    }
+  ],
   "servers": {
-    "<mcp-display-name>": {
+    "<spec.packageName>": {
       "type": "stdio",
       "command": "npx",
       "args": [
+        "--yes",
         "--registry",
         "https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/",
         "@jfrog/mcp-gateway",
@@ -91,29 +128,117 @@ Add the entry to `.vscode/mcp.json` under `servers`:
         "<SERVER_ID>"
       ],
       "env": {
-        "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<PACKAGE_NAME>"
+        "_JF_MCP_LOADER_ARGS": "project=<PROJECT>&mcp=<spec.packageName>",
+        "<ENV_VAR_OR_HEADER_NAME>": "${input:<mcp-slug>-<input-name-lowercased>}"
       }
     }
   }
 }
 ```
 
-If any env vars or headers were collected in Step 3, add them to the
-`env` object:
+Rules for the `inputs` block:
 
-```json
-    "<ENV_VAR_OR_HEADER_NAME>": "<VALUE>"
+- One entry per required env var / header from Step 3.
+- `id` is a workspace-unique identifier in the form
+  `<mcp-name>-<input-name>`, all lowercase, words separated by
+  hyphens. Re-use the same `id` across servers only when the value
+  truly is shared.
+- `type` is always `"promptString"`.
+- `password: true` for secret inputs (catalog `isSecret=true`) - hides
+  the characters VS Code shows while typing and stores the value
+  encrypted. Omit `password` for non-secret values like URLs.
+- `description` shows in the VS Code prompt - use the catalog's
+  `description` field.
+- Reference the input from `env` with `"${input:<id>}"`. For HTTP
+  headers with a `Bearer` prefix, either put the prefix in the
+  description and ask the user to include it, or use
+  `"Bearer ${input:<id>}"` and ask only for the token.
+
+For non-secret env vars (catalog `isSecret=false`), use an input
+entry WITHOUT `password: true` so VS Code still prompts but doesn't
+mask the typing.
+
+The loader reads these env vars at startup. VS Code substitutes every
+`${input:<id>}` with the stored value before handing the env to the
+process - so the gateway sees the real value, the file on disk shows
+only the placeholder.
+
+### Step 5: Authenticate OAuth MCPs (run automatically after Step 4)
+
+Run this step ONLY when both conditions hold:
+
+- The Step 4 entry has NO `${input:...}` references (no `inputs`
+  block was needed), AND
+- The `--inspect` output had a `remote` section.
+
+Otherwise (local-only MCP, or static-token MCP with `inputs`), skip
+Step 5 entirely.
+
+The gateway's `--login` command opens the user's browser, runs the
+OAuth flow, and caches the tokens in `~/.jfrog/jfrogmcp.conf.json`.
+Tell the user "I'm going to open your browser to sign you in to
+`<MCP_NAME>`" before running it:
+
+```
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --login \
+  --server <SERVER_ID> \
+  --project <PROJECT> \
+  --mcp <spec.packageName>
 ```
 
-The loader reads these env vars at startup and applies header values to
-upstream HTTP requests.
+Outcomes:
 
-Preserve any additional env vars the MCP requires (API keys, tokens,
-config) from its documentation.
+- Exits 0 - OAuth completed, tokens cached. Tell the user the
+  server is ready to start.
+- Exits with `expected 401, got 200` - the MCP is anonymous, no
+  auth needed. Ignore the error; the server is ready to start.
+- Any other error - paste it to the user verbatim and stop.
+
+## Troubleshooting
+
+### How to know a server actually failed
+
+VS Code labels MCP servers as Running, Stopped, or Failed in
+`MCP: List Servers`. There is also a silent failure mode:
+
+- A server reporting **0 tools** (or **"Discovered 0 tools"**) while
+  shown as Running is NOT a healthy server with no tools - it means
+  the gateway connected but the underlying MCP did not come up, so
+  no tools were exposed. Treat 0 tools the same as a Failed status.
+
+If the user says "the MCP isn't doing anything" or "tools aren't
+showing up", check for both states before assuming the server is
+working.
+
+### What to do
+
+1. **Previously-working OAuth MCP suddenly failing** - the cached
+   refresh token is likely dead. Re-run Step 5; the new tokens
+   overwrite the old ones.
+
+2. **Anything else** - ask the user to open `MCP: List Servers`,
+   right-click the failed (or 0-tools) server, choose **Show
+   Output**, and paste the last 50 lines. Read the output before
+   guessing at a cause. Common recoveries based on what the output
+   shows:
+
+   - HTTP 401 / 403 / authentication error on a server with
+     `${input:...}` in its entry - the stored secret is wrong. Tell
+     the user to click the **Clear** CodeLens above the matching
+     `inputs` entry in `.vscode/mcp.json`, then restart the server;
+     VS Code will re-prompt for the secret.
+   - `Failed to refresh OAuth token` / `invalid_grant` /
+     `No such refresh token found` - re-run Step 5.
+   - Network / proxy / DNS error - outside the gateway's scope;
+     tell the user and stop.
 
 ## Removing an MCP
 
-Delete the entry from `servers` in `.vscode/mcp.json`.
+Delete the entry from `servers` in `.vscode/mcp.json` and any now-unused
+entries from the top-level `inputs` array.
 
 ## Listing MCPs
 
@@ -136,22 +261,52 @@ and server ID.
      command (NEVER via file-search/glob - hidden directories are
      skipped) for available server IDs and ask the user to pick project
      and server in a SINGLE message.
-   - NEVER skip this step - always query the catalog even when
-     `servers` is empty.
-2. Run the lookup script from Step 2 using `__list_all__` as
-   `MCP_SEARCH` (it won't match any package, so the script returns
-   `NOT_FOUND|<all names>` - parse that list as the full catalog).
-3. List all `registeredServers[].mcpServer.spec.packageName` values that
-   are NOT already installed. Mark each as available to install.
+2. Run the gateway with `--list-available`:
+
+```
+npx --yes \
+  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --list-available \
+  --server <SERVER_ID> \
+  --project <PROJECT>
+```
+
+The output is a JSON array where each element has `name`,
+`packageName`, `description`, `type`, `packageVersion`, and optionally
+an inline `env[]` array of required environment variables (same shape
+as the full `--inspect` output).
+
+3. Compare each `packageName` against the `_JF_MCP_LOADER_ARGS` values
+   already present in `.vscode/mcp.json` to mark each one as
+   "available to install" or "already installed".
 
 ## Key Rules
 
-- **`npx` form `args` order (required):** `@jfrog/mcp-gateway`,
-  `--registry`, registry URL, `--server <SERVER_ID>`.
+- **`npx` argument order (required):** `--yes`, `--registry <URL>`,
+  `@jfrog/mcp-gateway`, then the gateway flags (`--inspect`,
+  `--login`, `--list-available`, or `--server <SERVER_ID>` for loader
+  mode). Both `--yes` and `--registry` MUST come BEFORE
+  `@jfrog/mcp-gateway` so `npx` picks them up; otherwise `npx` falls
+  back to the user's default registry (resolves to 404) and may
+  block on a confirmation prompt with no TTY.
+- **OAuth login** uses `npx @jfrog/mcp-gateway --login` (Step 5).
+  Run it automatically after Step 4 for remote MCPs that have no
+  required headers, and again later if a previously-working OAuth
+  MCP starts failing with refresh errors. Never tell the user to
+  authenticate via the IDE's native OAuth dialog or by hand-editing
+  `~/.jfrog/jfrogmcp.conf.json`.
 - `_JF_MCP_LOADER_ARGS` MUST contain `project=<NAME>&mcp=<PACKAGE_NAME>`.
 - Package name MUST come from the catalog API. NEVER guess.
 - NEVER install MCPs directly via `npx`/`pip`/`docker` - always use the
   gateway pattern above.
+- NEVER write `"type": "sse"`, `"type": "http"`, or a top-level `"url"`
+  field in `.vscode/mcp.json`. Every server entry is `"type": "stdio"`
+  pointing at `npx @jfrog/mcp-gateway`, even when the catalog MCP is
+  remote-only - the gateway proxies remote transports for you. Writing
+  `sse`/`http`/`url` bypasses the gateway and triggers VS Code's
+  native remote-MCP OAuth dialog instead of using the configured
+  `${input:...}` secret.
 - NEVER use Fetch/WebFetch for API calls that require authentication.
 - NEVER show access tokens or API keys in any output or message.
 - NEVER ask for info you can find in existing config or in
@@ -159,7 +314,5 @@ and server ID.
   `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD). Always read
   this file via a terminal command - never via file-search or glob
   tools, which skip hidden directories.
-- NEVER split the catalog lookup into multiple Bash calls - always run
-  the bundled script (`.github/scripts/lookup-mcp-catalog.py`).
 - NEVER try multiple servers - always ask the user to pick one.
 - To list installed MCPs: read `.vscode/mcp.json` and show the servers.
