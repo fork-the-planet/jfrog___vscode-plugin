@@ -96,7 +96,7 @@ in the OS keychain, never in the file).
    only after the user answers, and include exactly the inputs they
    opted into.
 3. If Step 2 returned no inputs at all (neither required nor
-   optional), skip the `inputs` block in Step 4 and continue.
+   optional), skip the `inputs` block within Step 4.
 
 ### Step 4: Write the config entry
 
