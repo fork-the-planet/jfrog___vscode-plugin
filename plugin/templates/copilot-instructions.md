@@ -149,6 +149,55 @@ The loader reads these env vars at startup. VS Code substitutes every
 process - so the gateway sees the real value, the file on disk shows
 only the placeholder.
 
+### Step 5: Authenticate OAuth MCPs (run automatically after Step 4)
+
+Run this step ONLY when both conditions hold:
+
+- The Step 4 entry has NO `${input:...}` references (no `inputs`
+  block was needed), AND
+- The `--inspect` output had a `remote` section.
+
+Otherwise (local-only MCP, or static-token MCP with `inputs`), skip
+Step 5 entirely.
+
+The gateway's `--login` command opens the user's browser, runs the
+OAuth flow, and caches the tokens in `~/.jfrog/jfrogmcp.conf.json`.
+Tell the user "I'm going to open your browser to sign you in to
+`<MCP_NAME>`" before running it:
+
+```
+npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  @jfrog/mcp-gateway \
+  --login \
+  --server <SERVER_ID> \
+  --project <PROJECT> \
+  --mcp <spec.packageName>
+```
+
+Outcomes:
+
+- Exits 0 - OAuth completed, tokens cached. Tell the user the
+  server is ready to start.
+- Exits with `expected 401, got 200` - the MCP is anonymous, no
+  auth needed. Ignore the error; the server is ready to start.
+- Any other error - paste it to the user verbatim and stop.
+
+## Troubleshooting a server that fails to start
+
+If a previously-working OAuth MCP starts failing later, the cached
+refresh token is likely dead. Re-run Step 5; the new tokens
+overwrite the old ones.
+
+For any other failure, ask the user to open `MCP: List Servers`,
+right-click the failed server, choose **Show Output**, and share
+the output before diagnosing. Common recoveries:
+
+- If the user thinks the stored secret is wrong, the **Clear**
+  CodeLens above the matching `inputs` entry in `.vscode/mcp.json`
+  lets VS Code re-prompt on the next start.
+- If the failure is a network/proxy issue, that's outside the
+  gateway's scope - tell the user and stop.
+
 ## Removing an MCP
 
 Delete the entry from `servers` in `.vscode/mcp.json` and any now-unused
@@ -201,10 +250,23 @@ as the full `--inspect` output).
   BEFORE `@jfrog/mcp-gateway` so `npx` picks it up; otherwise `npx`
   falls back to the user's default registry and the gateway package
   resolves to 404.
+- **OAuth login** uses `npx @jfrog/mcp-gateway --login` (Step 5).
+  Run it automatically after Step 4 for remote MCPs that have no
+  required headers, and again later if a previously-working OAuth
+  MCP starts failing with refresh errors. Never tell the user to
+  authenticate via the IDE's native OAuth dialog or by hand-editing
+  `~/.jfrog/jfrogmcp.conf.json`.
 - `_JF_MCP_LOADER_ARGS` MUST contain `project=<NAME>&mcp=<PACKAGE_NAME>`.
 - Package name MUST come from the catalog API. NEVER guess.
 - NEVER install MCPs directly via `npx`/`pip`/`docker` - always use the
   gateway pattern above.
+- NEVER write `"type": "sse"`, `"type": "http"`, or a top-level `"url"`
+  field in `.vscode/mcp.json`. Every server entry is `"type": "stdio"`
+  pointing at `npx @jfrog/mcp-gateway`, even when the catalog MCP is
+  remote-only - the gateway proxies remote transports for you. Writing
+  `sse`/`http`/`url` bypasses the gateway and triggers VS Code's
+  native remote-MCP OAuth dialog instead of using the configured
+  `${input:...}` secret.
 - NEVER use Fetch/WebFetch for API calls that require authentication.
 - NEVER show access tokens or API keys in any output or message.
 - NEVER ask for info you can find in existing config or in
