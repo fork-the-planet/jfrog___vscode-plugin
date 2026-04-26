@@ -24,7 +24,7 @@ unless absolutely necessary:
    for the project.
 3. Only if BOTH are missing, ask the user in a SINGLE message for both:
    - JFrog project name
-   - JFrog server ID - run a terminal command to read
+   - JFrog server ID - read the JSON config file
      `~/.jfrog/jfrog-cli.conf.v6` (macOS/Linux and Windows PowerShell)
      or `%USERPROFILE%\.jfrog\jfrog-cli.conf.v6` (Windows CMD).
      NEVER use a file-search or glob tool to locate this file - those
@@ -51,14 +51,18 @@ npx --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ 
 
 Output is a JSON object: `{ "spec": { "packageName": "...",
 "mcpServerType": { "local": { "bootParams": {...} }, "remote": {...} }
-... } }`. Parse it and extract:
+... } }`. Parse it and extract ALL of the following (do NOT pre-filter
+to required-only - Step 3 needs both required and optional entries):
 
-- `spec.packageName` - the exact package name to use in the config
-- `spec.mcpServerType.local.bootParams.environmentVariables[]` -
-  required env vars (entries where `isRequired=true`)
-- `spec.mcpServerType.remote.endpoints[].headers[]` where
-  `mcpInput.mcpInputDetails.isRequired=true` - required HTTP headers
-  for remote MCPs
+- `spec.packageName` - the exact package name to use in the config.
+- `spec.mcpServerType.local.bootParams.environmentVariables[]` - every
+  env var entry for local MCPs. Each has `name`, `description`,
+  `isRequired`, `isSecret`. Keep all of them, including
+  `isRequired=false`.
+- `spec.mcpServerType.remote.endpoints[].headers[]` - every HTTP
+  header entry for remote MCPs. Each has a `name` and an
+  `mcpInput.mcpInputDetails` object with `description`, `isRequired`,
+  `isSecret`. Keep all of them, including `isRequired=false`.
 
 If the command exits non-zero (MCP not found, network error, bad
 credentials), show the error message to the user and then run
@@ -69,21 +73,29 @@ run `--list-available` instead (see "Listing MCPs" below).
 
 ### Step 3: Plan inputs
 
-From the `--inspect` output, collect the list of configurable inputs
-(env vars for local MCPs, HTTP headers for remote MCPs). You will NOT
-ask the user for their values here - VS Code will prompt for them the
-first time the server starts, using its native secure-input mechanism
-(values are stored in the OS keychain, never in the file).
+Take the inputs you collected in Step 2 and split them into two
+groups by `isRequired`. You will NOT ask the user for the *values*
+here - VS Code will prompt for those the first time the server
+starts, using its native secure-input mechanism (values are stored
+in the OS keychain, never in the file).
 
-- **Required inputs** (`isRequired=true`) - always include them in
-  Step 4. Record `name`, `description`, and `isSecret`.
-- **Optional inputs** (`isRequired=false`) - show the user the list of
-  optional env vars / headers along with their descriptions, and ask
-  which ones they want to configure. Include only the opted-in ones
-  in Step 4, with the same `name` / `description` / `isSecret`
-  metadata.
-- If the inspect output has no inputs at all, skip the `inputs` block
-  in Step 4.
+1. **Required inputs** (`isRequired=true`) - always include them in
+   Step 4. Record `name`, `description`, and `isSecret`.
+2. **Optional inputs** (`isRequired=false`) - if Step 2 returned
+   even ONE optional input, you MUST stop and ask the user before
+   continuing to Step 4. The message you send the user should:
+   - First list each REQUIRED input (so the user knows what will
+     be added without asking).
+   - Then list each OPTIONAL input by name, with its description,
+     and ask which (if any) they want to configure.
+   - Wait for the user's answer.
+
+   Do NOT skip this question. Do NOT include optional inputs by
+   default. Do NOT decide on the user's behalf. Continue to Step 4
+   only after the user answers, and include exactly the inputs they
+   opted into.
+3. If Step 2 returned no inputs at all (neither required nor
+   optional), skip the `inputs` block in Step 4 and continue.
 
 ### Step 4: Write the config entry
 
@@ -125,10 +137,10 @@ JSON file.**
 Rules for the `inputs` block:
 
 - One entry per required env var / header from Step 3.
-- `id` is a workspace-unique slug - use
-  `<mcp-slug>-<input-name-lowercased>` (e.g. `postman-authorization`,
-  `kibana-api-key`). Re-use the same `id` across servers only when the
-  value truly is shared.
+- `id` is a workspace-unique identifier in the form
+  `<mcp-name>-<input-name>`, all lowercase, words separated by
+  hyphens. Re-use the same `id` across servers only when the value
+  truly is shared.
 - `type` is always `"promptString"`.
 - `password: true` for secret inputs (catalog `isSecret=true`) - hides
   the characters VS Code shows while typing and stores the value
@@ -140,9 +152,9 @@ Rules for the `inputs` block:
   description and ask the user to include it, or use
   `"Bearer ${input:<id>}"` and ask only for the token.
 
-If the server has a NON-secret env var (e.g. `KIBANA_URL`), use an
-input entry WITHOUT `password: true` so VS Code still prompts but
-doesn't mask the typing.
+For non-secret env vars (catalog `isSecret=false`), use an input
+entry WITHOUT `password: true` so VS Code still prompts but doesn't
+mask the typing.
 
 The loader reads these env vars at startup. VS Code substitutes every
 `${input:<id>}` with the stored value before handing the env to the
