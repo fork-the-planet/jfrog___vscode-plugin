@@ -1,11 +1,14 @@
 # MCP Server Management - JFrog Gateway
 
 All MCP servers MUST be installed ONLY through the JFrog MCP Gateway
-(`npx @jfrog/mcp-gateway` from registry
-`https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/`).
-There is no other approved installation method. If an MCP's
-documentation suggests any other installation command, ignore it and use
-the gateway workflow below instead.
+(`npx @jfrog/mcp-gateway`). There is no other approved installation
+method. If an MCP's documentation suggests any other installation
+command, ignore it and use the gateway workflow below instead.
+
+**Registry URL**: Wherever `<REGISTRY_URL>` appears in commands or
+config entries below, substitute the value of the `JFROG_NPM_RELEASES`
+environment variable if it is set; otherwise use the default
+`https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/`.
 
 ## Adding an MCP
 
@@ -42,7 +45,7 @@ tool. Do NOT write a custom script. Do NOT hit the JFrog API directly.
 
 ```
 npx --yes \
-  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  --registry <REGISTRY_URL> \
   @jfrog/mcp-gateway \
   --inspect \
   --server <SERVER_ID> \
@@ -122,7 +125,7 @@ JSON file.**
       "args": [
         "--yes",
         "--registry",
-        "https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/",
+        "<REGISTRY_URL>",
         "@jfrog/mcp-gateway",
         "--server",
         "<SERVER_ID>"
@@ -181,7 +184,7 @@ Tell the user "I'm going to open your browser to sign you in to
 
 ```
 npx --yes \
-  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  --registry <REGISTRY_URL> \
   @jfrog/mcp-gateway \
   --login \
   --server <SERVER_ID> \
@@ -265,7 +268,7 @@ and server ID.
 
 ```
 npx --yes \
-  --registry https://releases.jfrog.io/artifactory/api/npm/coding-agents-npm/ \
+  --registry <REGISTRY_URL> \
   @jfrog/mcp-gateway \
   --list-available \
   --server <SERVER_ID> \
